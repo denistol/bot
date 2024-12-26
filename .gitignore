@@ -2,3 +2,4 @@ build/*
 CMakeFiles
 .vscode
 *.jpg
+opencv_world4100.dll
