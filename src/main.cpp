@@ -313,7 +313,6 @@ std::vector<cv::Point> getTargets(bool debug, cv::Mat &windowImage, RECT &r, int
     };
 
     return out;
-
 }
 void scrollCamera(RECT &r, SerialPort &s, cv::Mat &windowImage)
 {
@@ -322,12 +321,12 @@ void scrollCamera(RECT &r, SerialPort &s, cv::Mat &windowImage)
     int x = static_cast<int>(screenCenter.x + r.left);
     int y = static_cast<int>(screenCenter.y + r.top);
 
-    for(int i=0; i<= 3; i++) {
+    for (int i = 0; i <= 3; i++)
+    {
         moveCursor(x, y, s);
-        s.write("swipe_up\n");
+        s.write("swipe_right\n");
         std::this_thread::sleep_for(std::chrono::milliseconds(120));
     }
-
 }
 
 void pickUp(SerialPort &s)
@@ -339,60 +338,63 @@ void pickUp(SerialPort &s)
     }
 }
 
+
 bool isLowHp(Images &images, SerialPort &s, cv::Mat &windowImage)
 {
     cv::Mat cap = capture();
     cv::Rect roi(0, 0, 175, 85);
     cv::Mat searchArea = cap(roi);
-
     return findTemplate(searchArea, images.lowHpImage, 0.85);
 };
 
-bool isTargetHovered(Images &images)
+bool isTargetHovered(Images &images, cv::Mat &cap)
 {
-    if (findTemplate(capture(), images.cursorOnTargetImage))
-    {
-        return true;
-    }
-    return false;
+    return findTemplate(cap, images.cursorOnTargetImage);
 }
 
-bool isTargetDead(Images &images)
+bool isTargetDead(Images &images, cv::Mat &cap)
 {
-    cv::Mat cap = capture();
     return findTemplate(cap, images.targetIsDeadImage, 0.95);
 };
 
-bool isTargetSelected(Images &images)
+bool isTargetSelected(Images &images, cv::Mat &cap)
 {
-    cv::Mat cap = capture();
     bool isSelected = findTemplate(cap, images.targetSelectedImage);
     return isSelected;
 };
 
-bool isTargetAlive(Images &images)
+bool isTargetAlive(Images &images, cv::Mat &cap)
 {
-    cv::Mat cap = capture();
     return findTemplate(cap, images.targetIsAliveImage, 0.9) && !isTargetDead(images);
 };
 
-bool isTargetValid(Images &images)
+bool isTargetValid(Images &images, cv::Mat &cap)
 {
-    cv::Mat cap = capture();
     return isTargetAlive(images);
 };
 
-// void log()
-// {
-//     std::cout << std::boolalpha << std::endl;
-//     std::cout << "---------------------" << std::endl;
-//     std::cout << "IS TARGET HOVERED: " + isTargetHovered(images) << std::endl;
-//     std::cout << "IS TARGET SELECTED: " << std::boolalpha << isTargetSelected(images) << std::endl;
-//     std::cout << "IS TARGET VALID: " << std::boolalpha << isTargetValid(images) << std::endl;
-//     std::cout << "IS TARGET ALIVE: " << std::boolalpha << isTargetAlive(images) << std::endl;
-//     std::cout << "---------------------" << std::endl;
-// }
 
+bool checkHp()
+{   
+    RECT r = getWindowRect();
+    HDC dng = GetDC(NULL);
+    COLORREF c = GetPixel(dng, 158 + r.left, 78 + r.top);
+    ReleaseDC(NULL, dng);
+    bool isFull = (int)GetRValue(c) == 181;
+    return isFull;
+}
+
+void log(Images &images)
+{
+    std::cout << std::boolalpha << std::endl;
+    std::cout << "---------------------" << std::endl;
+    std::cout << "IS TARGET HOVERED: " << std::boolalpha << isTargetHovered(images) << std::endl;
+    std::cout << "IS TARGET SELECTED: " << std::boolalpha << isTargetSelected(images) << std::endl;
+    std::cout << "IS TARGET VALID: " << std::boolalpha << isTargetValid(images) << std::endl;
+    std::cout << "IS TARGET ALIVE: " << std::boolalpha << isTargetAlive(images) << std::endl;
+    std::cout << "HP IS FULL: " << std::boolalpha << checkHp() << std::endl;
+    std::cout << "---------------------" << std::endl;
+}
 int main()
 {
     cv::namedWindow("Window Capture", cv::WINDOW_NORMAL);
@@ -405,6 +407,10 @@ int main()
     while (true)
     {
 
+        log(images);
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        continue;
+
         std::vector<cv::Point> targets = getTargets(true, windowImage, r);
         std::cout << "Targets count: " << targets.size() << std::endl;
 
@@ -413,43 +419,7 @@ int main()
         {
             break;
         }; // Esc.
-
-        if (isTargetAlive(images))
-        {
-            attack(serial);
-            continue;
-        }
-
-        if (isTargetSelected(images) && !isTargetAlive(images))
-        {
-            escape(serial);
-            pickUp(serial);
-            scrollCamera(r, serial, windowImage);
-            continue;
-        }
-
-        for (int i = 0; i < targets.size(); i++)
-        {
-            cv::Point t = targets[i];
-            int x = t.x + r.left;
-            int y = t.y + r.top;
-
-            moveCursor(x, y, serial);
-            std::this_thread::sleep_for(std::chrono::milliseconds(40));
-            if (isTargetHovered(images))
-            {
-                std::cout << "[+] Target is hovered" << std::endl;
-                MessageBeep(MB_ICONASTERISK);
-                mouseClick(serial);
-                std::this_thread::sleep_for(std::chrono::milliseconds(150));
-                break;
-            }
-        };
-
-        if (!isTargetSelected(images))
-        {
-            scrollCamera(r, serial, windowImage);
-        }
+        
     }
 
     cv::destroyAllWindows(); // Закрытие всех окон OpenCV
