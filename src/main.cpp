@@ -241,7 +241,7 @@ std::vector<cv::Point> groupedPoints(const std::vector<cv::Point> &points, doubl
     return centers;
 }
 
-std::vector<cv::Point> getTargets(bool debug, cv::Mat &windowImage, RECT &r, int maxTargets = 10)
+std::vector<cv::Point> getTargets(bool debug, cv::Mat &windowImage, RECT &r, int maxTargets = 5)
 {
     cv::Mat image = capture();
     cv::Mat gray;
@@ -260,6 +260,8 @@ std::vector<cv::Point> getTargets(bool debug, cv::Mat &windowImage, RECT &r, int
 
     windowImage = image.clone();
 
+    cv::circle(windowImage, screenCenter, 5, cv::Scalar(0, 255, 0), -1);
+
     for (const auto &contour : contours)
     {
 
@@ -272,12 +274,16 @@ std::vector<cv::Point> getTargets(bool debug, cv::Mat &windowImage, RECT &r, int
         cv::Moments m = cv::moments(contour);
         cv::Point2f center(m.m10 / m.m00, m.m01 / m.m00);
 
-        // Remove targets that are too close to the screen edges
-
-        if (center.y >= screenCenter.y || center.y - r.top <= 320)
+        if ((r.bottom - center.y) <= 230)
         {
             continue;
         };
+        
+        circle(windowImage, screenCenter, 3, cv::Scalar(0, 255, 0), -1);
+
+        // std::cout << "Center.y" << center.y << ", " << "R.top" << r.top << std::endl;
+
+
         // Remove targets that are too close to the screen edges
 
         if (
@@ -294,7 +300,9 @@ std::vector<cv::Point> getTargets(bool debug, cv::Mat &windowImage, RECT &r, int
          {
         float distA = norm(a - screenCenter);
         float distB = norm(b - screenCenter);
-        return a.y < b.y && distA < distB; });
+        return distA < distB; });
+
+    out = monsterCenters;
 
     out = groupedPoints(monsterCenters, 20);
 
@@ -305,10 +313,15 @@ std::vector<cv::Point> getTargets(bool debug, cv::Mat &windowImage, RECT &r, int
 
     if (debug)
     {
-        for (const auto &c : out)
+        int fontFace = cv::FONT_HERSHEY_SIMPLEX;
+
+        for (int i=0; i<= out.size(); i++)
+
         {
-            cv::line(windowImage, c, screenCenter, cv::Scalar(0, 255, 0), 2);
-            cv::circle(windowImage, c, 5, cv::Scalar(0, 255, 0), -1);
+            cv::Point c = out[i];
+            cv::circle(windowImage, c, 2, cv::Scalar(255, 0, 0), -1);
+            cv::line(windowImage, c, screenCenter, cv::Scalar(0, 255, 0), 1);
+            cv::putText(windowImage, std::to_string(i), c, fontFace, 0.5, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
         };
     };
 
@@ -338,7 +351,6 @@ void pickUp(SerialPort &s)
     }
 }
 
-
 bool isLowHp(Images &images, SerialPort &s, cv::Mat &windowImage)
 {
     cv::Mat cap = capture();
@@ -365,36 +377,29 @@ bool isTargetSelected(Images &images, cv::Mat &cap)
 
 bool isTargetAlive(Images &images, cv::Mat &cap)
 {
-    return findTemplate(cap, images.targetIsAliveImage, 0.9) && !isTargetDead(images);
+    return findTemplate(cap, images.targetIsAliveImage, 0.9) && !isTargetDead(images, cap);
 };
 
 bool isTargetValid(Images &images, cv::Mat &cap)
 {
-    return isTargetAlive(images);
+    return isTargetAlive(images, cap);
 };
 
-
-bool checkHp()
-{   
+void checkHp(SerialPort &s)
+{
     RECT r = getWindowRect();
     HDC dng = GetDC(NULL);
     COLORREF c = GetPixel(dng, 158 + r.left, 78 + r.top);
     ReleaseDC(NULL, dng);
     bool isFull = (int)GetRValue(c) == 181;
-    return isFull;
-}
 
-void log(Images &images)
-{
-    std::cout << std::boolalpha << std::endl;
-    std::cout << "---------------------" << std::endl;
-    std::cout << "IS TARGET HOVERED: " << std::boolalpha << isTargetHovered(images) << std::endl;
-    std::cout << "IS TARGET SELECTED: " << std::boolalpha << isTargetSelected(images) << std::endl;
-    std::cout << "IS TARGET VALID: " << std::boolalpha << isTargetValid(images) << std::endl;
-    std::cout << "IS TARGET ALIVE: " << std::boolalpha << isTargetAlive(images) << std::endl;
-    std::cout << "HP IS FULL: " << std::boolalpha << checkHp() << std::endl;
-    std::cout << "---------------------" << std::endl;
-}
+    if(!isFull) {
+        s.write("5\n");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    };
+};
+
+
 int main()
 {
     cv::namedWindow("Window Capture", cv::WINDOW_NORMAL);
@@ -406,21 +411,54 @@ int main()
 
     while (true)
     {
-
-        log(images);
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        continue;
-
         std::vector<cv::Point> targets = getTargets(true, windowImage, r);
         std::cout << "Targets count: " << targets.size() << std::endl;
-
         cv::imshow("Window Capture", windowImage);
-        if (cv::waitKey(200) == 27)
-        {
-            break;
-        }; // Esc.
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
         
-    }
+        if (cv::waitKey(200) == 27) { break; };
+
+        cv::Mat cap = capture();
+
+        checkHp(serial);
+
+        bool selected = isTargetSelected(images, cap);
+        bool alive = isTargetAlive(images, cap);
+
+        if(selected) {
+            if(alive){
+                attack(serial);
+                std::cout << "Attack!" << std::endl;
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            } else {
+                pickUp(serial);
+                std::cout << "Pickup!" << std::endl;
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            }
+        };
+
+        for(int i = 0; i<= targets.size(); i++){
+            if(i == targets.size()){
+                scrollCamera(r, serial, windowImage);
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                break;
+            };
+            cv::Point t = targets[i];
+            moveCursor(t.x + r.left, t.y + r.top, serial);
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            bool hovered = isTargetHovered(images, capture());
+            bool selected = isTargetSelected(images, capture());
+
+            if(hovered && !selected) {
+                mouseClick(serial);
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                break;
+            };
+        };
+    };
+
 
     cv::destroyAllWindows(); // Закрытие всех окон OpenCV
 
